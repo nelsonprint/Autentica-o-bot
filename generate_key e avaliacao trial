@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from cryptography.fernet import Fernet
 
+
 # Caminho do arquivo para armazenar a data de instalação criptografada
 install_date_file = 'install_date.enc'
 
