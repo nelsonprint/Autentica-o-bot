@@ -1,0 +1,108 @@
+import os
+import datetime
+import uuid
+import requests
+from bs4 import BeautifulSoup
+from cryptography.fernet import Fernet
+
+# Caminho do arquivo para armazenar a data de instalação criptografada
+install_date_file = 'install_date.enc'
+
+def generate_key():
+    key = Fernet.generate_key()
+    with open('secret.key', 'wb') as key_file:
+        key_file.write(key)
+    print("Chave secreta gerada e salva em 'secret.key'.")
+
+def load_key():
+    return open('secret.key', 'rb').read()
+
+def encrypt_data(data):
+    key = load_key()
+    f = Fernet(key)
+    encrypted_data = f.encrypt(data.encode())
+    return encrypted_data
+
+def decrypt_data(encrypted_data):
+    key = load_key()
+    f = Fernet(key)
+    decrypted_data = f.decrypt(encrypted_data).decode()
+    return decrypted_data
+
+def get_install_date():
+    if os.path.exists(install_date_file):
+        with open(install_date_file, 'rb') as file:
+            encrypted_date = file.read()
+            date_str = decrypt_data(encrypted_date)
+            return datetime.datetime.strptime(date_str, '%Y-%m-%d')
+    else:
+        install_date = datetime.datetime.now()
+        encrypted_date = encrypt_data(install_date.strftime('%Y-%m-%d'))
+        with open(install_date_file, 'wb') as file:
+            file.write(encrypted_date)
+        return install_date
+
+def check_expiration():
+    install_date = get_install_date()
+    current_date = datetime.datetime.now()
+    days_used = (current_date - install_date).days
+
+    # Depuração
+    print(f"Data de instalação: {install_date.strftime('%Y-%m-%d')}")
+    print(f"Data atual: {current_date.strftime('%Y-%m-%d')}")
+    print(f"Dias de uso: {days_used}")
+
+    if days_used >= 5:
+        print("O seu período de avaliação terminou.")
+        return False
+    else:
+        print(f"Período de avaliação: {days_used + 1} dias")  # Ajuste na contagem de dias
+        return True
+
+def get_mac_address():
+    mac = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) for elements in range(0, 2*6, 2)][::-1])
+    return mac
+
+def is_mac_listed(mac_address):
+    url = "https://toplivre.online/licenca/"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        page_content = response.text
+        soup = BeautifulSoup(page_content, 'html.parser')
+        
+        content_div = soup.find(class_='page-content')
+        if content_div:
+            content_text = content_div.get_text().lower()
+            mac_address_lower = mac_address.lower()
+            
+            if mac_address_lower in content_text:
+                return "Sistema Liberado"
+            else:
+                return ("O seu Sistema Expirou. Adquira a sua assinatura por R$ 149,90 clicando no link abaixo:\n"
+                        "Adquirir Assinatura: https://toplivre.online/venda-do-bot/")
+        else:
+            return "Classe 'page-content' não encontrada."
+    else:
+        return f"Erro ao acessar o site: Status Code {response.status_code}"
+
+def main():
+    # Gere a chave secreta uma vez e depois comente ou remova a linha abaixo
+    # generate_key()
+    
+    if not check_expiration():
+        print("O seu Sistema Expirou. Adquira a sua assinatura por R$ 149,90 clicando no link abaixo:\n"
+              "Adquirir Assinatura: https://toplivre.online/venda-do-bot/")
+        return
+
+    print("Tecle enter para Entrar no Sistema.")
+    input()  # Aguarda a entrada do usuário
+
+    print("SISTEMA INICIADO. BOA SORTE")
+
+if __name__ == "__main__":
+    main()
