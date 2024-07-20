@@ -5,18 +5,21 @@ import requests
 from bs4 import BeautifulSoup
 from cryptography.fernet import Fernet
 
-
-# Caminho do arquivo para armazenar a data de instalação criptografada
-install_date_file = 'install_date.enc'
+# Caminhos dos arquivos para armazenar a chave secreta e a data de instalação criptografada
+local_appdata_path = os.path.join(os.environ['LOCALAPPDATA'], 'secret.key')
+install_date_file = os.path.join(os.environ['LOCALAPPDATA'], 'install_date.enc')
 
 def generate_key():
     key = Fernet.generate_key()
-    with open('secret.key', 'wb') as key_file:
+    with open(local_appdata_path, 'wb') as key_file:
         key_file.write(key)
-    print("Chave secreta gerada e salva em 'secret.key'.")
+    print(f"Chave secreta gerada e salva em '{local_appdata_path}'.")
 
 def load_key():
-    return open('secret.key', 'rb').read()
+    if os.path.exists(local_appdata_path):
+        return open(local_appdata_path, 'rb').read()
+    else:
+        raise FileNotFoundError(f"Arquivo de chave não encontrado em '{local_appdata_path}'.")
 
 def encrypt_data(data):
     key = load_key()
@@ -54,7 +57,8 @@ def check_expiration():
     print(f"Dias de uso: {days_used}")
 
     if days_used >= 5:
-        print("O seu período de avaliação terminou.")
+        print("O seu Sistema Expirou. Adquira a sua assinatura por R$ 149,90 clicando no link abaixo:\n"
+              "Adquirir Assinatura: https://toplivre.online/venda-do-bot/")
         return False
     else:
         print(f"Período de avaliação: {days_used + 1} dias")  # Ajuste na contagem de dias
@@ -92,12 +96,7 @@ def is_mac_listed(mac_address):
         return f"Erro ao acessar o site: Status Code {response.status_code}"
 
 def main():
-    # Gere a chave secreta uma vez e depois comente ou remova a linha abaixo
-    # generate_key()
-    
     if not check_expiration():
-        print("O seu Sistema Expirou. Adquira a sua assinatura por R$ 149,90 clicando no link abaixo:\n"
-              "Adquirir Assinatura: https://toplivre.online/venda-do-bot/")
         return
 
     print("Tecle enter para Entrar no Sistema.")
