@@ -67,10 +67,12 @@ def executar_ordem(api, ordem):
 
         print(f"Executando ordem: {ordem}")  # Log para ver a ordem que está sendo executada
         check, id_ordem = api.buy(valor, ativo, direcao, timer)
+        print(f"Resultado da compra: check={check}, id_ordem={id_ordem}")
         if check:
             print(f"Ordem executada com sucesso, ID: {id_ordem}")
             while True:
                 check, win = api.check_win_v3(id_ordem)
+                print(f"Resultado do check_win_v3: check={check}, win={win}")
                 if check:
                     resultado = 'WIN' if win > 0 else 'LOSS'
                     print(f"RESULTADO: {resultado}")
@@ -84,6 +86,7 @@ def executar_ordem(api, ordem):
 
 def agendar_compra(ordem, api, ordens_executadas):
     try:
+    
         hora, ativo, timer, direcao, valor = ordem  # Remove o campo status do desempacotamento
         agora = datetime.now()
         horario_ordem = datetime.strptime(hora, '%H:%M').time()
