@@ -1,0 +1,170 @@
+from expiracao import check_expiration
+import sqlite3
+import time
+import threading
+from iqoptionapi.stable_api import IQ_Option
+from datetime import datetime, timedelta
+
+def criar_banco_de_dados():
+    conn = sqlite3.connect('ordens.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS sinais
+                 (Hora TEXT, Ativo TEXT, Timer INTEGER, Direcao TEXT, Valor REAL, Status TEXT DEFAULT '0')''')
+    conn.commit()
+    conn.close()
+
+def deletar_ordens_com_status_x():
+    conn = sqlite3.connect('ordens.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM sinais WHERE Status = 'x'")
+    conn.commit()
+    conn.close()
+
+def ler_ordens_db():
+    conn = sqlite3.connect('ordens.db')
+    c = conn.cursor()
+    c.execute("SELECT Hora, Ativo, Timer, Direcao, Valor FROM sinais WHERE Status = '0'")
+    ordens = c.fetchall()
+    conn.close()
+    return ordens
+
+def atualizar_status_ordem(hora, ativo, timer, direcao, valor):
+    hora_ordem = datetime.strptime(hora, "%H:%M")
+    hora_atual = datetime.now().time()
+    hora_atual = datetime.strptime(f"{hora_atual.hour}:{hora_atual.minute}", "%H:%M")
+    diferenca = (hora_atual - hora_ordem).total_seconds() / 60.0
+
+    if diferenca >= 1:
+        conn = sqlite3.connect('ordens.db')
+        c = conn.cursor()
+        c.execute("SELECT Status FROM sinais WHERE Hora = ? AND Ativo = ? AND Timer = ? AND Direcao = ? AND Valor = ?",
+                  (hora, ativo, timer, direcao, valor))
+        status_atual = c.fetchone()
+        if status_atual and status_atual[0] == "0":
+            c.execute("UPDATE sinais SET Status = 'x' WHERE Hora = ? AND Ativo = ? AND Timer = ? AND Direcao = ? AND Valor = ?",
+                      (hora, ativo, timer, direcao, valor))
+            conn.commit()
+        conn.close()
+
+def atualizar_todas_as_ordens():
+    conn = sqlite3.connect('ordens.db')
+    c = conn.cursor()
+    c.execute("SELECT Hora, Ativo, Timer, Direcao, Valor FROM sinais WHERE Status = '0'")
+    ordens = c.fetchall()
+    conn.close()
+    for ordem in ordens:
+        hora, ativo, timer, direcao, valor = ordem
+        atualizar_status_ordem(hora, ativo, timer, direcao, valor)
+
+def aguardar_e_atualizar_status(hora, ativo, timer, direcao, valor):
+    time.sleep(3)
+    atualizar_status_ordem(hora, ativo, timer, direcao, valor)
+    deletar_ordens_com_status_x()
+
+def converter_direcao(direcao):
+    if direcao.upper() == 'PUT':
+        return 'put'
+    elif direcao.upper() == 'CALL':
+        return 'call'
+    else:
+        raise ValueError("Direção inválida. Use 'PUT' ou 'CALL'.")
+
+def executar_ordem(api, ordem):
+    hora, ativo, timer, direcao, valor = ordem
+    try:
+        valor = float(valor)
+        direcao = converter_direcao(direcao)
+        print(f"Executando ordem: {ordem}")
+        check, id_ordem = api.buy(valor, ativo, direcao, timer)
+        if check:
+            print(f"Ordem executada com sucesso, ID: {id_ordem}")
+            while True:
+                check, win = api.check_win_v3(id_ordem)
+                if check:
+                    resultado = 'WIN' if win > 0 else 'LOSS'
+                    print(f"RESULTADO: {resultado}")
+                    threading.Thread(target=lambda: aguardar_e_atualizar_status(hora, ativo, timer, direcao, valor)).start()
+                    break
+    except ValueError as e:
+        print(f"Erro ao processar a ordem '{ordem}': {e}")
+
+def agendar_compra(ordem, api, ordens_executadas):
+    try:
+        hora, ativo, timer, direcao, valor = ordem
+        agora = datetime.now()
+        horario_ordem = datetime.strptime(hora, '%H:%M').time()
+        horario_ordem_completo = datetime.combine(agora.date(), horario_ordem)
+        horario_ordem_completo -= timedelta(seconds=0.13)
+        tempo_restante = (horario_ordem_completo - agora).total_seconds()
+
+        def executar_ordem_agendada():
+            executar_ordem(api, ordem)
+            ordens_executadas.add(ordem)
+
+        if tempo_restante > 0:
+            threading.Thread(target=lambda: time.sleep(tempo_restante) or executar_ordem_agendada()).start()
+        else:
+            print(f"Ordem ignorada devido a atraso: {ordem}")
+
+    except Exception as e:
+        print(f"Erro ao agendar a ordem '{ordem}': {e}")
+
+def selecionar_conta(api):
+    print("EM QUAL CONTA DESEJA SE CONECTAR?")
+    print("[1] CONTA DEMO")
+    print("[2] CONTA REAL")
+    escolha = input("[=>:  ")
+
+    if escolha == '1':
+        api.change_balance("PRACTICE")
+        print("Conectado à conta DEMO")
+    elif escolha == '2':
+        api.change_balance("REAL")
+        print("Conectado à conta REAL")
+    else:
+        print("Opção inválida. Conectando à conta PRACTICE por padrão.")
+        api.change_balance("PRACTICE")
+
+def main():
+    if not check_expiration():
+        print("Período de avaliação expirado. O sistema será encerrado.")
+        return
+
+    email = "nelson32braga@gmail.com"
+    senha = "J0ao8597*"
+    api = IQ_Option(email, senha)
+    api.connect()
+
+    if not api.check_connect():
+        print("Falha ao conectar-se à IQ Option")
+        return
+
+    print("Conectado à IQ Option")
+    selecionar_conta(api)
+    saldo = api.get_balance()
+    print(f"Saldo atual: {saldo}")
+
+    criar_banco_de_dados()
+    deletar_ordens_com_status_x()
+    
+    atualizar_todas_as_ordens()
+
+    ordens_executadas = set()
+    while True:
+        ordens = ler_ordens_db()
+        for ordem in ordens:
+            if ordem not in ordens_executadas:
+                try:
+                    ordens_executadas.add(ordem)
+                    agendar_compra(ordem, api, ordens_executadas)
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"Erro ao processar a ordem '{ordem}': {e}")
+                time.sleep(30)
+        
+        time.sleep(1)
+
+    api.close_connect()
+
+if __name__ == "__main__":
+    main()
